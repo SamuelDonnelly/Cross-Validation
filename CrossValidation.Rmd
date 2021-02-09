@@ -1,0 +1,229 @@
+---
+title: "Cross Validation"
+author: "Samuel Donnelly"
+date: "1/27/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(options(scipen = 999), echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(MASS)
+library(ISLR)
+library(boot)
+```
+
+## Validation Set Approach
+```{r}
+set.seed(777)
+train <- sample(392, 196)
+
+lm.fit <- lm(mpg~horsepower, data=Auto, subset=train)
+
+attach(Auto)
+paste("MSE for linear model is", mean((mpg -predict (lm.fit ,Auto))[-train ]^2)) #MSE for linear model
+```
+## Find MSE for Quadratic
+```{r}
+lm.fit2 <- lm(mpg~poly(horsepower,2), data=Auto, subset=train)
+paste("MSE for quadratic model is", mean((mpg -predict (lm.fit2 ,Auto ))[- train]^2)) #MSE for quadratic model
+```
+## Find MSE for Cubic
+```{r}
+lm.fit3=lm(mpg ∼ poly(horsepower ,3),data=Auto , subset=train)
+paste("MSE for cubic model", mean((mpg -predict (lm.fit3 ,Auto ))[- train]^2)) #MSE for cubic model
+```
+
+## Leave-One-Out Cross-Validation (LOOCV)
+```{r}
+glm.fit <- glm(mpg ∼ horsepower ,data=Auto)
+coef(glm.fit)
+
+cv.err <- cv.glm(Auto ,glm.fit)
+cv.err$delta #delta vector is cross-validation results
+```
+
+### iterate error for multiple models (e.g., i^x)
+```{r}
+cv.error=rep(0, 5)
+for (i in 1:5) {
+  glm.fit <- glm(mpg ~ poly (horsepower, i), data = Auto)
+  cv.error[i]=cv.glm(Auto ,glm.fit)$delta [1]
+}
+
+cv.error #MSE for i^x, x=1:5 (polynomial fits of orders one to five)
+```
+## K-Fold Cross-Validation
+```{r}
+set.seed(777)
+cv.error.10 <- rep(0 ,10)
+for (i in 1:10){
+  glm.fit=glm(mpg ∼ poly(horsepower ,i),data=Auto)
+ cv.error.10[i]=cv.glm(Auto ,glm.fit ,K=10) $delta[1]
+}
+cv.error.10 #MSE polynomials fits of orders one to ten.
+```
+## Bootstrap Cross-Validation
+```{r}
+alpha.fn=function (data ,index){
+  X=data$X[index]
+  Y=data$Y[index]
+  return((var(Y)-cov(X,Y))/(var(X)+var(Y) -2*cov(X,Y)))
+}
+
+alpha.fn(Portfolio, 1:100) #estimate alpha based on the selected observations
+```
+
+# DEMO
+
+### Read Data
+```{r}
+data <- read.csv("test-data-set.txt", header=TRUE, sep = " ") #read data
+```
+### Function to create multiple randomly sampled dataframes
+```{r}
+for (iternum in (1:3)){
+    print(paste("Shuffle number:", iternum))
+    ds.shuffled <- data[sample(nrow(data)), ]
+    print(ds.shuffled)
+}
+```
+### Developing subsets corresponding to each of the k folds from our dataset
+```{r}
+dataset.obj <- Boston
+summary(dataset.obj)
+## change the variable chas to factor, since it's a dummy variable
+dataset.obj$chas <- as.factor(dataset.obj$chas)
+## verify
+summary(dataset.obj$chas)
+```
+### Generate vector that will hold the size of each of the k subsets
+```{r}
+## The overall k-fold-based CV approach
+samplesize <- nrow(dataset.obj)
+numfolds <- 10 # we're setting k = 10
+
+quotient <- samplesize %/% numfolds # the %/% operator returns the quotient of a division
+remainder <- samplesize %% numfolds # the %% operator returns the remainder of a division
+
+vct.sizes <- rep(quotient, numfolds) # create a vector representing the initial subsets with size = quotient
+if(remainder > 0){
+    for(i in 1:remainder){
+        vct.sizes[i] <- vct.sizes[i] + 1 # for the "remainder" number of subsets, add one to their size
+    }
+}
+
+print(paste("K:", 10, "n:", samplesize))
+print(vct.sizes)
+```
+### Fitting a model by hand, using simple cross validation
+```{r}
+startval <- 1
+endval <- nrow(dataset.obj)/2
+
+model <- glm(crim ~ indus + dis + medv,
+             data = dataset.obj[-(startval:endval), ])
+pred.vals <- predict(model, newdata=dataset.obj[startval:endval, ],
+                     type="response")
+rmse <- sqrt(mean((dataset.obj$crim[startval:endval] - pred.vals)^2))
+
+```
+### Fitting models and testing their predicitive accuracy across the k folds
+```{r}
+
+set.seed(112)
+dataset.obj <- dataset.obj[sample(nrow(dataset.obj)), ]
+
+## create the vector to hold RMSE values
+vct.rmses <- numeric(numfolds)
+
+startval <- 1
+for(kth in (1:numfolds)){
+    endval <- vct.sizes[kth] + startval - 1
+
+    model <- glm(crim ~ indus + dis + medv,
+                 data = dataset.obj[-(startval:endval), ])
+    pred.vals <- predict(model,
+                         newdata = dataset.obj[startval:endval, ],
+                         type="response")
+    ## compute the RMSE
+    rmse <- sqrt(mean((dataset.obj$crim[startval:endval] - pred.vals)^2))
+    ## store the current fold's RMSE
+    vct.rmses[kth] <- rmse
+    ## modify the start value to correspond to the next fold
+    startval <- endval + 1
+}
+
+## Compute the overall RMSE
+overall.rmse <- mean(vct.rmses)
+print(paste("For the model crim ~ indus + dis + medv, the overall 10-fold CV RMSE is:",
+            round(overall.rmse, 6)))
+```
+### Next we will repeat the same procedure as above, for the model "crim ~ indus + dis + medv + age", and use the RMSE value to determine whether the second model has better predictive accuracy (smaller RMSE is better) than the first one.
+```{r}
+set.seed(112)
+dataset.obj <- dataset.obj[sample(nrow(dataset.obj)), ]
+
+## create the vector to hold RMSE values
+vct.rmses <- numeric(numfolds)
+
+startval <- 1
+for(kth in (1:numfolds)){
+    endval <- vct.sizes[kth] + startval - 1
+
+    model <- glm(crim ~ indus + dis + medv + age,
+                 data = dataset.obj[-(startval:endval), ])
+    pred.vals <- predict(model,
+                         newdata = dataset.obj[startval:endval, ],
+                         type="response")
+    ## compute the RMSE
+    rmse <- sqrt(mean((dataset.obj$crim[startval:endval] - pred.vals)^2))
+    ## store the current fold's RMSE
+    vct.rmses[kth] <- rmse
+    ## modify the start value to correspond to the next fold
+    startval <- endval + 1
+}
+
+## Compute the overall RMSE
+overall.rmse <- mean(vct.rmses)
+print(paste("For the model crim ~ indus + dis + medv + age, the overall 10-fold CV RMSE is:",
+            round(overall.rmse, 6)))
+# Comparing the overall 10-fold CV-based RMSE values, we see that the four-predictor model, with an RMSE of 6.96262 is worse than the three-predictor, which has an RMSE of 6.8223. Next, let us evaluate the variability in the coefficients of the three predictor model using the bootstrap resampling method.
+```
+### Determining the variability in the best model's components
+```{r}
+getCoeffs <- function(dataset, indices, formula){
+    d <- dataset[indices, ]
+    fit <- glm(formula, data=d)
+    return(coef(fit))
+}
+library(boot)
+set.seed(122)
+results <- boot(data=Boston,
+                statistic=getCoeffs,
+                R=1000,
+                formula = crim ~ indus + dis + medv)
+
+
+print("Coefficients of the model")
+print(coef(model))
+print("Estimated coefficient values from bootstrap")
+print(results)
+prednames <- c("indus", "dis", "medv")
+# Since we have four coefficients, we will iterate over the computations of CIs, one at a time
+for(i in 2:4){
+    print(paste("The confidence interval for", prednames[i-1], "is:"))
+    print(boot.ci(results, conf=0.95, index=i, type="basic"))
+}
+
+# Looking at the confidence intervals for each of the coefficients (this includes the intercept) provides us with a measure of variability of each coefficient's estimate. Additionally, looking at the values in "bias" column in the overall results provides us an indication of how much bias is estimated to exist in our model. Finally, the information present in the column labeled "std. error" (standard error) indicates to us the amount of variability present in the estimate of the corresponding model coefficient. These estimates can add to our collection of different pieces of information used to determine a model's fit and to compare it with other models.
+```
+
+
+
+
+
+
+
